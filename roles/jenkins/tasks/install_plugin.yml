@@ -1,0 +1,19 @@
+- name: Check plugin data for {{ item }}
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://localhost:8080/pluginManager/plugin/{{ item }}/api/json"
+    status_code: [200, 404]
+  register: plugin_data
+
+- name: Install {{ item }} plugin
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://127.0.0.1:8080/pluginManager/install?plugin.{{ item }}.default=on"
+    method: POST
+    status_code: [200, 302]
+  when: plugin_data.status == 404
+  changed_when: true

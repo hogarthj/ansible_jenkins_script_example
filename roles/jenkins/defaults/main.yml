@@ -1,0 +1,17 @@
+jenkins_packages:
+    - jenkins
+    - java-1.8.0-openjdk
+    - git
+    - initscripts
+    - sudo
+    - openssh
+
+jenkins_plugins:
+  - git
+  - workflow-aggregator
+  - matrix-auth
+  - github-branch-source
+
+jenkins_admin_user: admin
+
+jenkins_admin_pass:  changeme

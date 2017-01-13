@@ -1,0 +1,17 @@
+- name: Check if project "{{ item.project_name }}" already created
+  jenkins_script:
+    script: "{{ jenkins_check_project }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    args:
+      project_name: "{{ item.project_name }}"
+  register: project_status
+
+- name: Create the project "{{ item.project_name }}" if it does not exist
+  jenkins_script:
+    script: "{{ jenkins_create_project }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    args: "{{ item }}"
+  when: project_status.output.find('true') == -1
+  changed_when: true

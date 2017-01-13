@@ -1,0 +1,136 @@
+- name: Default the fact to not secured
+  set_fact:
+    jenkins_secure: no
+
+- name: Check if config on disk
+  stat:
+    path: ~jenkins/config.xml
+  register: config_status
+
+- name: Read in current config
+  command: cat ~jenkins/config.xml
+  changed_when: False
+  register: jenkins_config_xml
+  when: config_status.stat.exists == True
+
+- name: Mark jenkins as secured
+  set_fact:
+    jenkins_secure: yes
+  when:
+    - config_status.stat.exists == True
+    - "'hudson.security.AuthorizationStrategy$Unsecured' not in jenkins_config_xml.stdout"
+
+- name: Add jenkins yum repo
+  yum_repository:
+    name: jenkins-stable-upstream
+    baseurl: "https://pkg.jenkins.io/redhat-stable/"
+    description: Jenkins-stable
+    gpgcheck: no
+
+- name: Install jenkins and dependencies
+  package:
+    name: "{{ item }}"
+    state: latest
+  with_items: "{{ jenkins_packages }}"
+
+- name: Disable wizards via java argument
+  lineinfile:
+    regexp: JENKINS_JAVA_OPTIONS="(.*headless=true)"
+    backrefs: yes
+    line: JENKINS_JAVA_OPTSS="\1 -Djenkins.install.runSetupWizard=false"
+    dest: /etc/sysconfig/jenkins
+
+- name: Disable the wizard via files as well
+  lineinfile:
+    dest: ~jenkins/{{ item }}
+    create: yes
+    line: 2.7.3
+  with_items:
+    - jenkins.install.InstallUtil.lastExecVersion
+    - jenkins.install.UpgradeWizard.state
+
+- name: start jenkins service
+  service:
+    name: jenkins
+    state: running
+    enabled: yes
+  register: svc_status
+- name: Wait for Jenkins to start
+  include: ready_wait.yml
+  when: svc_status|changed
+
+- name: Get status of update data
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: http://127.0.0.1:8080/updateCenter/coreSource/api/json
+    return_content: yes
+    body_format: json
+    status_code: [200, 404]
+  register: updatecenter_data
+
+- name: Refresh plugin update data
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: http://127.0.0.1:8080/pluginManager/checkUpdatesServer
+    method: POST
+    status_code: [200, 302]
+    body_format: json
+  when: "{{ ansible_date_time.epoch }} - {{ updatecenter_data.json.dataTimestamp // 1000 if updatecenter_data.json is defined else 0 }}  >= 86400 "
+  changed_when: true
+
+- name: Install plugins
+  include: install_plugin.yml
+  with_items: "{{ jenkins_plugins }}"
+
+- name: Wait for plugins to be installed
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://127.0.0.1:8080/updateCenter/installStatus"
+    return_content: yes
+    body_format: json
+  register: plugin_status
+  until: "'Pending' not in plugin_status.json.data.jobs|map(attribute='installStatus')"
+  retries: 60
+  delay: 10
+
+- name: Check if we need to restart Jenkins to activate plugins
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://127.0.0.1:8080/updateCenter/api/json?tree=restartRequiredForCompletion"
+    return_content: yes
+    body_format: json
+  register: jenkins_restart_required
+
+- name: Restart Jenkins to activate new plugins when it's safe to do so
+  uri:
+    force_basic_auth: "{{ jenkins_secure }}"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_pass }}"
+    url: "http://127.0.0.1:8080/safeRestart"
+    method: POST
+    status_code: [200, 302]
+  when: jenkins_restart_required.json.restartRequiredForCompletion|bool
+  changed_when: true
+
+- name: Wait for restart
+  include: ready_wait.yml
+
+- name: Configure security
+  include: configure_security.yml
+  when: "{{ jenkins_secure | bool }} == False"
+
+- name: Add any user/pass credentials required
+  include: add_credential.yml
+  with_items: "{{ jenkins_creds | default([])}}"
+
+- name: Add any projects required
+  include: add_project.yml
+  with_items: "{{ jenkins_github_projects | default([])}}"

@@ -1,0 +1,13 @@
+- hosts: jenkins
+  become: true
+  become_user: root
+  roles:
+    - { role: jenkins, tags: ["jenkins"] }
+
+  tasks:
+    - name: install packages for example in repo
+      yum:
+        name:
+          - openssl-devel
+          - gcc
+          - make

@@ -1,0 +1,114 @@
+jenkins_configure_security: |
+    import hudson.security.*
+
+    def instance = Jenkins.getInstance()
+    def hudsonRealm = new HudsonPrivateSecurityRealm(false)
+
+    hudsonRealm.createAccount('${jenkins_admin_user}','${jenkins_admin_pass}')
+    instance.setSecurityRealm(hudsonRealm)
+
+    def strategy = new hudson.security.ProjectMatrixAuthorizationStrategy()
+    
+    strategy.add(Jenkins.ADMINISTER, '${jenkins_admin_user}')
+    strategy.add(hudson.model.Item.READ, 'anonymous')
+    strategy.add(hudson.model.Hudson.READ, 'anonymous')
+
+    instance.setAuthorizationStrategy(strategy)
+
+    instance.save()
+
+jenkins_check_credential: |
+    import com.cloudbees.plugins.credentials.*
+    import com.cloudbees.plugins.credentials.common.*
+    import com.cloudbees.plugins.credentials.domains.*
+
+    global_domain = Domain.global()
+
+    def cred_desc = "${cred_desc}"
+
+    credentials =
+      Jenkins.instance.getExtensionList(
+        'com.cloudbees.plugins.credentials.SystemCredentialsProvider'
+      )[0].getCredentials(global_domain)
+
+    node_cred = credentials.find { it.getDescription() == cred_desc }
+    return node_cred ? true : false
+
+jenkins_add_credential: |
+    import com.cloudbees.plugins.credentials.*
+    import com.cloudbees.plugins.credentials.common.*
+    import com.cloudbees.plugins.credentials.domains.*
+    import com.cloudbees.plugins.credentials.impl.*
+
+    def instance = Jenkins.getInstance()
+
+    def cred_desc = "${cred_desc}"
+    def cred_user = "${cred_user}"
+    def cred_pass = "${cred_pass}"
+    def cred_id   = "${cred_id}"
+
+    if (cred_id == "" ) {
+        cred_id = null
+    }
+
+    global_domain = Domain.global()
+    credentials_store = Jenkins.instance.getExtensionList(
+        'com.cloudbees.plugins.credentials.SystemCredentialsProvider'
+        )[0].getStore()
+
+    credentials = new UsernamePasswordCredentialsImpl(
+        CredentialsScope.GLOBAL,
+        cred_id,
+        cred_desc,
+        cred_user,
+        cred_pass,
+        )
+    credentials_store.addCredentials(global_domain, credentials)
+    instance.save()
+
+jenkins_check_project: |
+    import jenkins.branch.OrganizationFolder
+    import org.jenkinsci.plugins.github_branch_source.GitHubSCMNavigator
+
+    instance = Jenkins.getInstance()
+    def ofs = instance.getAllItems(OrganizationFolder)
+    def project_name = "${project_name}"
+    def projects = []
+
+    projects = ofs.findAll { it.getNavigators().find { it instanceof GitHubSCMNavigator  }  }
+    
+    if (projects.find { it.name == project_name  }) {
+          return true
+    }
+
+    return false
+
+jenkins_create_project: |
+    import jenkins.branch.OrganizationFolder
+    import org.jenkinsci.plugins.github_branch_source.GitHubSCMNavigator
+    import com.cloudbees.hudson.plugins.folder.computed.PeriodicFolderTrigger
+
+    import com.cloudbees.plugins.credentials.*
+    import com.cloudbees.plugins.credentials.common.*
+    import com.cloudbees.plugins.credentials.domains.*
+    import jenkins.branch.BranchIndexingCause;
+
+    def instance = Jenkins.getInstance()
+
+    global_domain = Domain.global()
+
+    credentials = Jenkins.instance.getExtensionList(
+                'com.cloudbees.plugins.credentials.SystemCredentialsProvider'
+                )[0].getCredentials(global_domain)
+
+    node_cred = credentials.find { it.getDescription().contains("${cred_desc}")  }
+
+    def gh = instance.createProject(OrganizationFolder, "${project_name}")
+
+    gh.getNavigators().add(
+      new GitHubSCMNavigator(null, "${project_name}", node_cred.id, node_cred.id)
+    )
+
+    gh.addTrigger(new PeriodicFolderTrigger("${max_trigger}"))
+    gh.scheduleBuild(0, new BranchIndexingCause())
+    instance.save()

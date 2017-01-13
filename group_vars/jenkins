@@ -1,0 +1,9 @@
+jenkins_creds:
+  - cred_desc: github credentials
+    cred_user: github_user
+    cred_pass: github_private_auth_token
+
+jenkins_github_projects:
+  - cred_desc: github credentials
+    project_name: github_user
+    max_trigger: 5m
